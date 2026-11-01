@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, symlink, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { preparePermissionProbe } from '../dist/permission-probe.js';
 import { inspectScenarioPack, installScenarioPack } from '../dist/packs.js';
 import { createBundleAttestation, verifyBundleAttestation } from '../dist/attestation.js';
+import { evaluateExpectations } from '../dist/evaluate.js';
+import { readCachedRun, writeCachedRun } from '../dist/result-cache.js';
 import { buildResultCacheIdentity } from '../dist/result-cache.js';
 import { createReproBundle } from '../dist/repro-core.js';
 import { inspectMcpContract, McpContractSchema } from '../dist/mcp-contract.js';
@@ -128,4 +130,62 @@ test('MCP server oversized stdout is rejected before JSON parsing', async (t) =>
     }
   });
   await assert.rejects(inspectMcpContract(contract, {cwd}), /8 MiB|stdout frame/i);
+});
+
+test('assertion paths reject traversal and external symlinks', async (t) => {
+  const dir = await temp(t);
+  const inside = path.join(dir, 'worktree');
+  const outside = path.join(dir, 'outside');
+  await mkdir(inside);
+  await mkdir(outside);
+  await writeFile(path.join(outside, 'secret.txt'), 'private value');
+  await symlink(outside, path.join(inside, 'shortcut'), process.platform === 'win32' ? 'junction' : 'dir');
+  const result = await evaluateExpectations({
+    expect: {
+      files_exist: ['../outside/secret.txt', 'shortcut/secret.txt'],
+      files_absent: ['../outside/secret.txt'],
+      file_contains: [
+        {path:'../outside/secret.txt',text:'private'},
+        {path:'shortcut/secret.txt',text:'private'}
+      ]
+    }
+  }, inside, [], {toolCalls:0,totalTokens:0});
+  assert.equal(result.length, 5);
+  assert.ok(result.every((line) => /Unsafe|safely read/.test(line)));
+});
+
+test('signed attestation envelope without signature always fails', async (t) => {
+  const dir = await temp(t);
+  await writeFile(path.join(dir,'proof.txt'), 'evidence');
+  const attestation = await createBundleAttestation(dir);
+  assert.equal((await verifyBundleAttestation(dir, {
+    ...attestation, algorithm:'ed25519-sha256-manifest'
+  })).passed, false);
+  assert.equal((await verifyBundleAttestation(dir, {
+    ...attestation, algorithm:'sha256', signature:'bogus'
+  })).passed, false);
+});
+
+test('failed cached results are never loaded', async (t) => {
+  const dir = await temp(t);
+  const identity = { schemaVersion:2, test:'failure-handling' };
+  await writeCachedRun(dir, identity, {
+    schemaVersion:1, gitCommit:'abc', passed:false, failures:['transient']
+  });
+  assert.equal(await readCachedRun(dir, identity), undefined);
+});
+
+test('Ed25519 attestations verify with the correct key and reject tampering', async (t) => {
+  const dir = await temp(t);
+  await writeFile(path.join(dir,'payload.txt'), 'original payload');
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const privateKeyPem = privateKey.export({format:'pem',type:'pkcs8'});
+  const publicKeyPem = publicKey.export({format:'pem',type:'spki'});
+  const proof = await createBundleAttestation(dir, {privateKeyPem});
+  assert.equal(proof.algorithm, 'ed25519-sha256-manifest');
+  assert.equal((await verifyBundleAttestation(dir, proof, {publicKeyPem})).passed, true);
+  await writeFile(path.join(dir,'payload.txt'), 'tampered payload');
+  const check = await verifyBundleAttestation(dir, proof, {publicKeyPem});
+  assert.equal(check.passed, false);
+  assert.ok(check.failures.some((x) => /Integrity mismatch/.test(x)));
 });
