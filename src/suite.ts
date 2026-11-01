@@ -6,7 +6,7 @@ import YAML from 'yaml';
 import { z } from 'zod';
 import { loadScenario } from './config.js';
 import { clusterRunFailures, fingerprintRun, type FailureFingerprint } from './fingerprint.js';
-import { runScenarioWithCache } from './result-cache.js';
+import { runScenarioWithCache, type CacheDigestMemo } from './result-cache.js';
 import { runScenario } from './runner.js';
 import { getRepoRoot, resolveCommit } from './git.js';
 import { CANARY_VERSION } from './version.js';
@@ -337,6 +337,7 @@ export async function runSuite(suitePath: string, options: SuiteRunOptions = {})
   const failFast = options.failFast ?? suite.fail_fast;
   const reuseResults = options.reuseResults ?? suite.reuse_results;
   const results: SuiteScenarioResult[] = new Array(resolved.length);
+  const hashMemo: CacheDigestMemo = new Map();
   let cursor = 0;
   let stop = false;
 
@@ -357,6 +358,7 @@ export async function runSuite(suitePath: string, options: SuiteRunOptions = {})
             gitRefOverride: options.gitRefOverride,
             artifactLabel: options.artifactLabel ? `${options.artifactLabel}-${index + 1}` : undefined,
             cacheRoot: options.cacheRoot,
+            hashMemo,
           });
           run = cached.result;
           cacheHit = cached.cacheHit;
