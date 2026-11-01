@@ -1,0 +1,99 @@
+import { z } from 'zod';
+export declare const ScenarioSchema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    name: z.ZodString;
+    prompt: z.ZodString;
+    tags: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    affects: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    always_run: z.ZodDefault<z.ZodBoolean>;
+    stability: z.ZodOptional<z.ZodObject<{
+        min_pass_rate: z.ZodDefault<z.ZodNumber>;
+        max_changed_file_variants: z.ZodDefault<z.ZodNumber>;
+        max_hook_sequence_variants: z.ZodOptional<z.ZodNumber>;
+        max_permission_sequence_variants: z.ZodOptional<z.ZodNumber>;
+        max_total_tokens_cv: z.ZodOptional<z.ZodNumber>;
+        max_tool_calls_cv: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
+    setup: z.ZodOptional<z.ZodObject<{
+        commands: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strict>>;
+    claude: z.ZodDefault<z.ZodObject<{
+        executable: z.ZodDefault<z.ZodString>;
+        args: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        model: z.ZodOptional<z.ZodString>;
+        permission_mode: z.ZodOptional<z.ZodEnum<{
+            default: "default";
+            acceptEdits: "acceptEdits";
+            plan: "plan";
+            auto: "auto";
+            dontAsk: "dontAsk";
+            bypassPermissions: "bypassPermissions";
+        }>>;
+        include_hook_events: z.ZodDefault<z.ZodBoolean>;
+        max_turns: z.ZodOptional<z.ZodNumber>;
+        max_budget_usd: z.ZodOptional<z.ZodNumber>;
+        timeout_seconds: z.ZodDefault<z.ZodNumber>;
+        env: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strict>>;
+    verify: z.ZodOptional<z.ZodObject<{
+        commands: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strict>>;
+    expect: z.ZodOptional<z.ZodObject<{
+        changed_files: z.ZodOptional<z.ZodObject<{
+            allow: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            require: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            deny: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        }, z.core.$strict>>;
+        files_exist: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        files_absent: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        file_contains: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            path: z.ZodString;
+            text: z.ZodString;
+        }, z.core.$strict>>>;
+        claude_output_contains: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        claude_output_absent: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        permissions: z.ZodOptional<z.ZodObject<{
+            max_prompts: z.ZodOptional<z.ZodNumber>;
+            max_denied: z.ZodOptional<z.ZodNumber>;
+            deny_prompted_tools: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        }, z.core.$strict>>;
+        hooks: z.ZodOptional<z.ZodObject<{
+            sequence: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            deny_unexpected: z.ZodDefault<z.ZodBoolean>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+    policy: z.ZodOptional<z.ZodObject<{
+        never_auto_allow: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        require_prompt: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        deny_use: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        allow_only: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strict>>;
+    limits: z.ZodOptional<z.ZodObject<{
+        max_tool_calls: z.ZodOptional<z.ZodNumber>;
+        max_total_tokens: z.ZodOptional<z.ZodNumber>;
+        max_cost_usd: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
+    regressions: z.ZodOptional<z.ZodObject<{
+        max_total_tokens_increase_pct: z.ZodOptional<z.ZodNumber>;
+        max_input_tokens_increase_pct: z.ZodOptional<z.ZodNumber>;
+        max_output_tokens_increase_pct: z.ZodOptional<z.ZodNumber>;
+        max_reported_cost_increase_pct: z.ZodOptional<z.ZodNumber>;
+        max_tool_calls_increase_pct: z.ZodOptional<z.ZodNumber>;
+        max_permission_prompts_increase: z.ZodOptional<z.ZodNumber>;
+        max_permission_denied_increase: z.ZodOptional<z.ZodNumber>;
+        require_same_hook_sequence: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
+    recording: z.ZodOptional<z.ZodObject<{
+        git_commit: z.ZodString;
+        recorded_at: z.ZodString;
+        claude_version: z.ZodOptional<z.ZodString>;
+        executable: z.ZodOptional<z.ZodString>;
+        model: z.ZodOptional<z.ZodString>;
+        config_files: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        prompt_redacted: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export type Scenario = z.infer<typeof ScenarioSchema>;
+export declare function parseScenario(value: unknown): Scenario;
+export declare function loadScenario(path: string): Promise<Scenario>;
+//# sourceMappingURL=config.d.ts.map

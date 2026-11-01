@@ -1,0 +1,209 @@
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { evaluateExpectations } from './evaluate.js';
+import { createDetachedWorktree, getChangedFiles, getRepoRoot, getTrackedChanges, resolveCommit } from './git.js';
+import { parseStreamMetrics } from './metrics.js';
+import { mergePermissionProbeMetrics, preparePermissionProbe } from './permission-probe.js';
+import { evaluatePermissionPolicy } from './policy.js';
+import { runShellCommand, spawnCapture } from './process.js';
+function summarize(command, result) {
+    return { command, code: result.code, durationMs: result.durationMs, timedOut: result.timedOut };
+}
+function safeSlug(value) {
+    return value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'run';
+}
+async function writeArtifact(repoRoot, result, label) {
+    const dir = path.join(repoRoot, '.canary', 'results');
+    await mkdir(dir, { recursive: true });
+    const stamp = result.createdAt.replace(/[:.]/g, '-');
+    const suffix = label ? `-${safeSlug(label)}` : '';
+    const file = path.join(dir, `${stamp}-${safeSlug(result.scenario)}${suffix}.json`);
+    await writeFile(file, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+    return file;
+}
+async function currentFileHash(file) {
+    try {
+        return createHash('sha256').update(await readFile(file)).digest('hex');
+    }
+    catch {
+        return null;
+    }
+}
+function needsHookEvents(scenario) {
+    return Boolean(scenario.claude.include_hook_events
+        || scenario.expect?.hooks
+        || scenario.regressions?.require_same_hook_sequence);
+}
+function containsFlag(args, flag) {
+    return args.some((arg) => arg === flag || arg.startsWith(`${flag}=`));
+}
+export function buildClaudeArgs(scenario, extraClaudeArgs = []) {
+    const args = ['-p', scenario.prompt, '--output-format', 'stream-json', '--verbose', '--no-session-persistence'];
+    if (needsHookEvents(scenario))
+        args.push('--include-hook-events');
+    if (scenario.claude.model)
+        args.push('--model', scenario.claude.model);
+    if (scenario.claude.permission_mode)
+        args.push('--permission-mode', scenario.claude.permission_mode);
+    if (scenario.claude.max_turns !== undefined)
+        args.push('--max-turns', String(scenario.claude.max_turns));
+    if (scenario.claude.max_budget_usd !== undefined)
+        args.push('--max-budget-usd', String(scenario.claude.max_budget_usd));
+    args.push(...scenario.claude.args);
+    args.push(...extraClaudeArgs);
+    return args;
+}
+export async function filterFixtureChanges(worktreePath, changedFiles, fixtureState = {}) {
+    const filtered = [];
+    for (const relative of changedFiles) {
+        if (!(relative in fixtureState)) {
+            filtered.push(relative);
+            continue;
+        }
+        const expected = fixtureState[relative];
+        const current = await currentFileHash(path.join(worktreePath, relative));
+        if (current !== expected)
+            filtered.push(relative);
+    }
+    return filtered;
+}
+/**
+ * Only expose an allowlisted *category* in portable artifacts. Claude stderr and
+ * stream-json can contain prompts, credentials and environment values.
+ */
+export function classifyClaudeFailure(output) {
+    if (/(?:provider error[^\n]*|api error[^\n]*|\b)(?:429\b|rate[ _-]?limit|quota|resource[_ -]?exhausted)/i.test(output)) {
+        return 'upstream provider rate limit/quota';
+    }
+    if (/(?:provider error[^\n]*|api error[^\n]*|\b)(?:503\b|service unavailable|overloaded|high demand)/i.test(output)) {
+        return 'upstream provider unavailable';
+    }
+    if (/\b(?:ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET)\b/.test(output))
+        return 'network/connection error';
+    return undefined;
+}
+export async function runScenario(scenario, options = {}) {
+    const invocationDir = options.cwd ?? process.cwd();
+    const repoRoot = await getRepoRoot(invocationDir);
+    if (!options.allowDirtyWorkingTree) {
+        const trackedChanges = await getTrackedChanges(repoRoot);
+        if (trackedChanges.length > 0) {
+            throw new Error('Canary requires a clean tracked working tree so every run starts from the same commit. Commit or stash tracked changes first.');
+        }
+    }
+    const requestedRef = options.gitRefOverride ?? 'HEAD';
+    const gitCommit = await resolveCommit(repoRoot, requestedRef);
+    const worktree = await createDetachedWorktree(repoRoot, gitCommit);
+    const started = Date.now();
+    const setup = [];
+    const verification = [];
+    const failures = [];
+    const executable = options.executableOverride ?? scenario.claude.executable;
+    let prepared;
+    let permissionProbe;
+    try {
+        prepared = options.prepareWorktree ? await options.prepareWorktree(worktree.path) : undefined;
+        permissionProbe = await preparePermissionProbe(scenario);
+        const callerArgs = [...scenario.claude.args, ...(prepared?.extraClaudeArgs ?? [])];
+        if (permissionProbe && containsFlag(callerArgs, '--permission-prompt-tool')) {
+            throw new Error('Permission assertions/regressions cannot be combined with a caller-supplied --permission-prompt-tool because Canary could not observe those prompt decisions reliably.');
+        }
+        let setupOk = true;
+        for (const command of scenario.setup?.commands ?? []) {
+            const processResult = await runShellCommand(command, worktree.path);
+            setup.push(summarize(command, processResult));
+            if (processResult.code !== 0) {
+                failures.push(`Setup command failed (${processResult.code}): ${command}`);
+                setupOk = false;
+                break;
+            }
+        }
+        let claudeResult = {
+            code: 1,
+            signal: null,
+            stdout: '',
+            stderr: '',
+            durationMs: 0,
+            timedOut: false,
+        };
+        if (setupOk) {
+            const extraArgs = [...(prepared?.extraClaudeArgs ?? []), ...(permissionProbe?.extraClaudeArgs ?? [])];
+            const args = buildClaudeArgs(scenario, extraArgs);
+            claudeResult = await spawnCapture(executable, args, {
+                cwd: worktree.path,
+                timeoutMs: scenario.claude.timeout_seconds * 1000,
+                env: { ...process.env, ...scenario.claude.env, ...prepared?.env, ...permissionProbe?.env },
+            });
+            if (claudeResult.timedOut)
+                failures.push(`Claude timed out after ${scenario.claude.timeout_seconds}s`);
+            if (claudeResult.outputTruncated)
+                failures.push('Claude output exceeded Canary\'s 16 MiB capture limit; refusing to evaluate incomplete stream-json output.');
+            if (claudeResult.code !== 0) {
+                const category = classifyClaudeFailure(`${claudeResult.stderr}\n${claudeResult.stdout}`);
+                failures.push(`Claude exited with code ${claudeResult.code}${category ? ` (${category})` : ''}`);
+            }
+        }
+        let metrics = parseStreamMetrics(claudeResult.stdout);
+        if (setupOk && metrics.parseErrors > 0) {
+            failures.push(`Claude stream-json contained ${metrics.parseErrors} malformed non-empty line${metrics.parseErrors === 1 ? '' : 's'}; metrics and assertions would be unreliable.`);
+        }
+        if (permissionProbe) {
+            try {
+                metrics = mergePermissionProbeMetrics(metrics, await permissionProbe.collect());
+            }
+            catch (error) {
+                failures.push(`Permission instrumentation failed: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        if (scenario.policy && setupOk) {
+            const evaluation = evaluatePermissionPolicy(claudeResult.stdout, metrics, scenario.policy);
+            metrics.policyCoverage = evaluation.coverage;
+            failures.push(...evaluation.failures);
+        }
+        if (setupOk) {
+            for (const command of scenario.verify?.commands ?? []) {
+                const processResult = await runShellCommand(command, worktree.path);
+                verification.push(summarize(command, processResult));
+                if (processResult.code !== 0)
+                    failures.push(`Verification command failed (${processResult.code}): ${command}`);
+            }
+        }
+        const rawChangedFiles = await getChangedFiles(worktree.path);
+        const changedFiles = await filterFixtureChanges(worktree.path, rawChangedFiles, prepared?.fixtureState);
+        const claudeOutput = `${claudeResult.stdout}\n${claudeResult.stderr}`;
+        failures.push(...await evaluateExpectations(scenario, worktree.path, changedFiles, metrics, claudeOutput));
+        const result = {
+            schemaVersion: 1,
+            scenario: scenario.name,
+            executable,
+            passed: failures.length === 0,
+            failures,
+            claudeExitCode: claudeResult.code,
+            claudeTimedOut: claudeResult.timedOut,
+            durationMs: Date.now() - started,
+            changedFiles,
+            setup,
+            verification,
+            metrics,
+            createdAt: new Date().toISOString(),
+            gitCommit,
+        };
+        result.artifactPath = await writeArtifact(repoRoot, result, options.artifactLabel);
+        return result;
+    }
+    finally {
+        try {
+            await permissionProbe?.cleanup();
+        }
+        finally {
+            try {
+                await prepared?.cleanup?.();
+            }
+            finally {
+                await worktree.cleanup();
+            }
+        }
+    }
+}
+//# sourceMappingURL=runner.js.map

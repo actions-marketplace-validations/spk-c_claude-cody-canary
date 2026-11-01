@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SLP-DEV1/claude-code-canary/raw/main/schemas/canary.schema.json",
+  "title": "Claude Code Canary Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "prompt"],
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "prompt": { "type": "string", "minLength": 1 },
+    "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+    "affects": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+    "always_run": { "type": "boolean", "default": false },
+    "stability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_pass_rate": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
+        "max_changed_file_variants": { "type": "integer", "minimum": 1, "default": 1 },
+        "max_hook_sequence_variants": { "type": "integer", "minimum": 1 },
+        "max_permission_sequence_variants": { "type": "integer", "minimum": 1 },
+        "max_total_tokens_cv": { "type": "number", "minimum": 0 },
+        "max_tool_calls_cv": { "type": "number", "minimum": 0 }
+      }
+    },
+    "setup": { "$ref": "#/$defs/commands" },
+    "verify": { "$ref": "#/$defs/commands" },
+    "claude": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "executable": { "type": "string", "minLength": 1, "default": "claude" },
+        "args": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "model": { "type": "string", "minLength": 1 },
+        "permission_mode": { "enum": ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] },
+        "include_hook_events": { "type": "boolean", "default": false },
+        "max_turns": { "type": "integer", "minimum": 1 },
+        "max_budget_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "default": 900 },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} }
+      }
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "changed_files": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "require": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "deny": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "files_exist": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "files_absent": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "file_contains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "text"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "text": { "type": "string" }
+            }
+          }
+        },
+        "claude_output_contains": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "claude_output_absent": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_prompts": { "type": "integer", "minimum": 0 },
+            "max_denied": { "type": "integer", "minimum": 0 },
+            "deny_prompted_tools": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] }
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sequence": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+            "deny_unexpected": { "type": "boolean", "default": false }
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "never_auto_allow": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+        "require_prompt": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+        "deny_use": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+        "allow_only": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_tool_calls": { "type": "integer", "minimum": 0 },
+        "max_total_tokens": { "type": "integer", "minimum": 0 },
+        "max_cost_usd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "regressions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_total_tokens_increase_pct": { "type": "number", "minimum": 0 },
+        "max_input_tokens_increase_pct": { "type": "number", "minimum": 0 },
+        "max_output_tokens_increase_pct": { "type": "number", "minimum": 0 },
+        "max_reported_cost_increase_pct": { "type": "number", "minimum": 0 },
+        "max_tool_calls_increase_pct": { "type": "number", "minimum": 0 },
+        "max_permission_prompts_increase": { "type": "integer", "minimum": 0 },
+        "max_permission_denied_increase": { "type": "integer", "minimum": 0 },
+        "require_same_hook_sequence": { "type": "boolean", "default": false }
+      }
+    },
+    "recording": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "recorded_at"],
+      "properties": {
+        "git_commit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+        "recorded_at": { "type": "string", "minLength": 1 },
+        "claude_version": { "type": "string", "minLength": 1 },
+        "executable": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "config_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "prompt_redacted": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commands": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "name": "claude-code-canary",
+  "version": "2.1.0",
+  "description": "Deterministic regression testing, release bisection and plugin compatibility matrices for Claude Code",
+  "author": "SLP-DEV1",
+  "type": "module",
+  "main": "./dist/api.js",
+  "types": "./dist/api.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    }
+  },
+  "bin": {
+    "claude-canary": "dist/v2-cli.js"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/v2-cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "docs:check": "node scripts/check-doc-links.mjs",
+    "version:check": "node scripts/check-version-sync.mjs",
+    "release:version": "node scripts/set-version.mjs",
+    "check": "npm run version:check && npm run lint && npm test && npm run docs:check && npm run build",
+    "prepublishOnly": "npm run check"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "anthropic",
+    "regression-testing",
+    "compatibility-testing",
+    "release-testing",
+    "version-bisect",
+    "github-actions",
+    "continuous-integration",
+    "developer-tools",
+    "plugins",
+    "mcp",
+    "mcp-server",
+    "agent-evals",
+    "ai-agent-testing",
+    "ai-coding",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SLP-DEV1/claude-code-canary.git"
+  },
+  "homepage": "https://github.com/SLP-DEV1/claude-code-canary#readme",
+  "bugs": {
+    "url": "https://github.com/SLP-DEV1/claude-code-canary/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dependencies": {
+    "commander": "14.0.3",
+    "minimatch": "10.2.6",
+    "openpgp": "6.3.2",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@openpgp/web-stream-tools": "0.3.1",
+    "@types/node": "24.19.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}
