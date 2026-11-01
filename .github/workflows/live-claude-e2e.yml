@@ -1,4 +1,5 @@
 name: Live Claude Code E2E (authenticated)
+run-name: Live Claude E2E (${{ inputs.suite }})
 
 on:
   workflow_dispatch:
